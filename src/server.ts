@@ -34,6 +34,14 @@ app.post("/api/chat", async (req, res) => {
       }
     });
 
+    // The number check stays server-side for now: logged, not shown in the UI.
+    const v = result.verification;
+    console.log(
+      `[check] confidence ${v.confidence ?? "n/a"} (${v.checked} cited numbers checked, ` +
+        `${v.mismatched.length} mismatched sentences, ${v.uncited.length} uncited` +
+        `${v.unknownSourceIds.length ? `, unknown IDs: ${v.unknownSourceIds.join(", ")}` : ""})`,
+    );
+
     res.json({ answer: result.answer });
   } catch (err) {
     console.error(err);

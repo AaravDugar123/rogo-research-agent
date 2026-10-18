@@ -1,74 +1,58 @@
-# Benchmark: before vs after
+# Benchmark results
 
-Model: claude-sonnet-5. 7 questions, 2 runs each, run one at a time.
-Numbers are averages over the 2 runs. Raw data: `baseline.json`.
+Model: claude-sonnet-5. 7 questions, 2 runs each (14 agent runs per benchmark).
+Numbers are averages per question unless noted. Raw data: `baseline.json`.
 
-## Overall
+- **Before (#1):** the original code.
+- **Final (#4):** forgiving tools with trimmed output, no editor pass, parallel tool calls, the new
+  prompt, and inline source IDs (API citations off).
 
-| Metric | Before | After |
-|---|---|---|
-| Time per question | 24.6 s | |
-| Model calls per question | 3.6 | |
-| Tool calls per question | 4.3 | |
-| Tool errors (total, 14 runs) | 1 | |
-| Input tokens per question | 17,131 | |
-| Output tokens per question | 2,100 | |
-| Checks passed | 14 / 16 | |
-| Numbers found in fetched data | 90% | |
+## Final vs Before
+
+| Metric | Before | Final | Change |
+|---|---|---|---|
+| Time per question | 24.6 s | 11.9 s | **-52%** |
+| Model calls per question | 3.6 | 2.4 | -33% |
+| Tool calls per question | 4.3 | 3.1 | -28% |
+| Input tokens per question | 17,131 | 10,570 | **-38%** |
+| Output tokens per question | 2,100 | 974 | **-54%** |
+| Tool errors (14 runs) | 1 | 0 | |
+| Checks passed | 14 / 16 | 14 / 16 | same |
+| Numbers found in fetched data | 90% | 91% | same |
+| Answers with inline source IDs | 0 / 14 | 14 / 14 | **new** |
+| Answers using markdown tables (render as raw pipes) | 7 / 14 | 0 / 14 | |
+| Answers using bold (renders as raw `**`) | 14 / 14 | 3 / 14 | |
+| Mean answer length | 1,765 chars | 1,344 chars | -24% |
+
+Before ran one question at a time; Final ran all 14 at once with 0 API retries (no rate-limit waiting
+hidden in the times). Time per question is measured per run, so it is comparable; whole-benchmark
+time (5.7 min vs 24 s) is not, since most of that gap is the parallel benchmark runner.
 
 ## Per question
 
-**Time (seconds)**
+| Question | Time (s) Before / Final | Model / tool calls Before / Final | Input tokens Before / Final | Checks Before / Final |
+|---|---|---|---|---|
+| Q1 Compare Acme and Globex | 29.5 / 16.3 | 3.0, 3.0 / 2.0, 3.0 | 17,199 / 9,669 | 2/4 / 2/4 |
+| Q2 Umbrella Health risks | 31.0 / 11.8 | 5.5, 10.0 / 4.0, 3.0 | 21,856 / 12,723 | 2/2 / 2/2 |
+| Q3 Initech subscription transition | 22.5 / 11.0 | 3.0, 3.0 / 2.0, 2.0 | 11,463 / 7,168 | 2/2 / 2/2 |
+| Q4 Fastest-growing company | 26.6 / 13.1 | 3.0, 5.0 / 2.0, 5.0 | 23,907 / 12,624 | 2/2 / 2/2 |
+| Q5 GLBX vs ITCH | 36.1 / 19.9 | 3.5, 5.0 / 3.0, 5.5 | 21,021 / 17,512 | 2/2 / 2/2 |
+| Q6 Acme growth last year | 13.4 / 6.2 | 3.0, 2.0 / 2.0, 2.0 | 11,959 / 8,055 | 2/2 / 2/2 |
+| Q7 Initech FY2025 revenue | 13.3 / 5.0 | 4.0, 2.0 / 2.0, 1.0 | 12,511 / 6,244 | 2/2 / 2/2 |
 
-| Question | Before | After |
-|---|---|---|
-| Q1 Compare Acme and Globex | 29.5 | |
-| Q2 Umbrella Health risks | 31.0 | |
-| Q3 Initech subscription transition | 22.5 | |
-| Q4 Fastest-growing company | 26.6 | |
-| Q5 GLBX vs ITCH | 36.1 | |
-| Q6 Acme growth last year | 13.4 | |
-| Q7 Initech FY2025 revenue | 13.3 | |
+Checks: Q1 and Q6 cover both Acmes (or ask which); Q1 and Q2 mention acquired or organic growth;
+Q3 and Q7 flag preliminary or unfiled data; Q4 names Acme Robotics; Q5 has zero tool errors.
 
-**Model calls / tool calls**
+## What improved, and why
 
-| Question | Before | After |
-|---|---|---|
-| Q1 | 3.0 / 3.0 | |
-| Q2 | 5.5 / 10.0 | |
-| Q3 | 3.0 / 3.0 | |
-| Q4 | 3.0 / 5.0 | |
-| Q5 | 3.5 / 5.0 | |
-| Q6 | 3.0 / 2.0 | |
-| Q7 | 4.0 / 2.0 | |
+- **Speed and cost.** Deleting the editor pass removed one model call per question and the re-sending
+  of the whole transcript (it was 51% of input tokens). Parallel tool calls and trimmed tool output
+  did the rest.
+- **Traceability.** Every answer now cites its sources inline, e.g. "[FIN-ACMR]", "[DOC-ITCH-001]",
+  and no answer cited an ID the tools didn't return.
+- **Readability.** No tables or raw tool lines, far less bold, about a quarter shorter.
+- **Tools.** Q2 tool calls fell from 10 to 3: search no longer fails on long queries or misses plurals.
+  "Acme" now returns an ambiguity error listing both companies instead of depending on luck.
 
-**Input / output tokens**
-
-| Question | Before | After |
-|---|---|---|
-| Q1 | 17,199 / 2,896 | |
-| Q2 | 21,856 / 2,391 | |
-| Q3 | 11,463 / 1,931 | |
-| Q4 | 23,907 / 2,347 | |
-| Q5 | 21,021 / 3,092 | |
-| Q6 | 11,959 / 1,037 | |
-| Q7 | 12,511 / 1,011 | |
-
-**Checks (both runs)**
-
-| Question | What is checked | Before | After |
-|---|---|---|---|
-| Q1 | Covers both Acmes; mentions Globex acquisitions/organic growth | 2 / 4 | |
-| Q2 | Mentions acquisition-driven growth | 2 / 2 | |
-| Q3 | Flags preliminary / unfiled data | 2 / 2 | |
-| Q4 | Names Acme Robotics | 2 / 2 | |
-| Q5 | Zero tool errors | 2 / 2 | |
-| Q6 | Covers both Acmes or asks which | 2 / 2 | |
-| Q7 | Flags preliminary / unfiled data | 2 / 2 | |
-
-## Notes on the "before" numbers
-
-- The editor call alone is 51% of input tokens and 33% of output tokens.
-- Q1 misses Globex's acquisition-driven growth in both runs (organic growth was about 0.6%).
-- The 10% of numbers not found are calculations (growth rates, margins). Spot checks were correct.
-- Only 1 tool error in 14 runs: the model searches first, which works around exact-name lookups.
+## What's still open
+More integration is needed for the source IDs, so that only quantitative claims drawn from the sources are cited, not every sentence. Some citations are misplaced, for example on the model's own conclusions. Additionally, the validation checks, specifically the regex-based number checks, were left open and need more development.

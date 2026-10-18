@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { executeTool, resolveCompany, searchTerms, ToolError, type ToolOutput } from "./tools.ts";
+import { documents } from "./data.ts";
+import { executeTool, resolveCompany, searchTerms, shapeDocument, ToolError, type ToolOutput } from "./tools.ts";
 
-/** Every successful tool must return non-empty search_result blocks with citations on. */
+/** Every successful tool must return non-empty search_result blocks (API rules) titled with their ID. */
 function expectSearchResults(out: ToolOutput) {
   expect(Array.isArray(out)).toBe(true);
   const blocks = out as Exclude<ToolOutput, string>;
@@ -9,10 +10,17 @@ function expectSearchResults(out: ToolOutput) {
   for (const b of blocks) {
     expect(b.type).toBe("search_result");
     expect(b.content.length).toBeGreaterThan(0);
-    expect(b.citations?.enabled).toBe(true);
+    for (const c of b.content) {
+      expect(c.type).toBe("text");
+      expect(c.text.trim()).not.toBe("");
+    }
+    expect(b.citations?.enabled).toBe(false); // one setting for all results, as the API requires
+    expect(b.title.startsWith(`${b.source}: `)).toBe(true); // the ID the model cites inline
   }
   return blocks;
 }
+
+const sources = (out: ToolOutput) => expectSearchResults(out).map((b) => b.source);
 
 const lines = (out: ToolOutput) => expectSearchResults(out).flatMap((b) => b.content.map((c) => c.text));
 
@@ -26,9 +34,18 @@ describe("resolveCompany", () => {
     expect(resolveCompany("itch").name).toBe("Initech");
   });
 
-  it("accepts a unique partial name", () => {
+  it("accepts a unique partial name, ignoring corporate suffixes and possessives", () => {
     expect(resolveCompany("Globex").ticker).toBe("GLBX");
+    expect(resolveCompany("Robotics").ticker).toBe("ACMR");
     expect(resolveCompany("Acme Robotics Inc.").ticker).toBe("ACMR");
+    expect(resolveCompany("Globex Corp").ticker).toBe("GLBX");
+    expect(resolveCompany("Initech's").ticker).toBe("ITCH");
+  });
+
+  it("does not match fragments or pick one company out of several named", () => {
+    expect(() => resolveCompany("x")).toThrow(/No company matches/);
+    expect(() => resolveCompany("tech")).toThrow(/No company matches/);
+    expect(() => resolveCompany("Acme Corp vs Globex")).toThrow(/one company per call/);
   });
 
   it("treats an uppercase ticker as exact, even when it looks like a name", () => {
@@ -82,10 +99,25 @@ describe("tools", () => {
     expectSearchResults(out);
   });
 
-  it("searchDocuments matches plurals and filters by ticker", async () => {
-    const blocks = expectSearchResults(await executeTool("searchDocuments", { query: "risks acquisitions", company: "UMBR" }));
-    expect(blocks.map((b) => b.source)).toContain("DOC-UMBR-002");
-    expect(blocks.every((b) => b.source.startsWith("DOC-UMBR-"))).toBe(true);
+  it("searchDocuments filters by ticker", async () => {
+    const found = sources(await executeTool("searchDocuments", { query: "acquisitions", company: "UMBR" }));
+    expect(found).toContain("DOC-UMBR-002");
+    expect(found.every((s) => s.startsWith("DOC-UMBR-"))).toBe(true);
+  });
+
+  it("searchDocuments matches plurals to singulars", async () => {
+    // DOC-ACME-002 says "the loss of any one of them"; the query says "losses".
+    expect(sources(await executeTool("searchDocuments", { query: "losses", company: "ACME" }))).toEqual(["DOC-ACME-002"]);
+  });
+
+  it("searchDocuments searches the form and matches whole words, not fragments", async () => {
+    expect(sources(await executeTool("searchDocuments", { query: "8-K" }))).toEqual(["DOC-ITCH-001"]);
+    // "us" appears inside "customers" and "focused" but never as a word.
+    expect(typeof (await executeTool("searchDocuments", { query: "us" }))).toBe("string");
+  });
+
+  it("searchDocuments with only common words and no company is an error", async () => {
+    await expect(executeTool("searchDocuments", { query: "what is the" })).rejects.toThrow(/searchable/);
   });
 
   it("searchDocuments with an empty query lists all of a company's documents", async () => {
@@ -107,9 +139,20 @@ describe("tools", () => {
 });
 
 describe("searchTerms", () => {
-  it("drops stopwords, strips plurals and caps at 6", () => {
+  it("drops stopwords, makes plurals singular and keeps the first 6", () => {
     expect(searchTerms("What are the risks of the acquisitions")).toEqual(["risk", "acquisition"]);
-    expect(searchTerms("one two three four five six seven eight")).toHaveLength(6);
+    expect(searchTerms("losses companies status analysis 10-K")).toEqual(["loss", "company", "status", "analysis", "10-k"]);
+    expect(searchTerms("one two three four five six seven eight")).toEqual(["one", "two", "three", "four", "five", "six"]);
     expect(searchTerms("Acme's growth")).toEqual(["acme", "growth"]);
+  });
+});
+
+describe("shapeDocument", () => {
+  it("splits every document into sentences without losing text", () => {
+    for (const d of documents) {
+      const sentences = shapeDocument(d).content.map((c) => c.text);
+      expect(sentences.join(" ")).toBe(d.body);
+      expect(sentences.length).toBeGreaterThan(1);
+    }
   });
 });

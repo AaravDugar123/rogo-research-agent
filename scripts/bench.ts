@@ -325,6 +325,25 @@ function summarize(rs: RunRecord[]) {
     numbersGroundedPct: pct(grounded, checked),
     runsThatThrew: rs.filter((r) => r.error).length,
     apiRetries: rs.reduce((s, r) => s + (r.apiRetries ?? 0), 0), // absent in the first baseline
+    ...agentVerification(rs),
+  };
+}
+
+/** Totals from the agent's own citation check. null for agents that don't report it. */
+function agentVerification(rs: RunRecord[]) {
+  type V = { checked: number; mismatched: unknown[]; uncited: unknown[]; confidence?: number | null; unknownSourceIds?: string[] };
+  const vs = rs.map((r) => r.extras?.verification as V | undefined);
+  if (!vs.some(Boolean)) {
+    return { meanConfidence: null, madeUpIdRuns: null, citedNumbersChecked: null, mismatchedSentences: null, uncitedSentences: null, truncatedRuns: null };
+  }
+  const scores = vs.map((v) => v?.confidence).filter((c): c is number => typeof c === "number");
+  return {
+    meanConfidence: scores.length ? Math.round(mean(scores) * 100) / 100 : null,
+    madeUpIdRuns: vs.filter((v) => v?.unknownSourceIds?.length).length,
+    citedNumbersChecked: vs.reduce((s, v) => s + (v?.checked ?? 0), 0),
+    mismatchedSentences: vs.reduce((s, v) => s + (v?.mismatched.length ?? 0), 0),
+    uncitedSentences: vs.reduce((s, v) => s + (v?.uncited.length ?? 0), 0),
+    truncatedRuns: rs.filter((r) => r.extras?.truncated === true).length,
   };
 }
 
@@ -397,6 +416,12 @@ lines.push(
   `| Numbers grounded in tool output | ${summary.numbersGrounded} (${summary.numbersGroundedPct ?? "n/a"}%) |`,
   `| Runs that threw | ${summary.runsThatThrew} |`,
   `| API retries (if > 0, those runs' wall times include backoff) | ${summary.apiRetries} |`,
+  `| Mean hidden confidence (1 = every number verified) | ${summary.meanConfidence ?? "n/a"} |`,
+  `| Answers citing an ID no tool returned | ${summary.madeUpIdRuns ?? "n/a"} |`,
+  `| Cited numbers checked by the agent | ${summary.citedNumbersChecked ?? "n/a"} |`,
+  `| Sentences with a number that doesn't match its citation | ${summary.mismatchedSentences ?? "n/a"} |`,
+  `| Sentences with numbers but no citation | ${summary.uncitedSentences ?? "n/a"} |`,
+  `| Answers cut off at max_tokens | ${summary.truncatedRuns ?? "n/a"} |`,
 );
 
 const failures = records.flatMap((r) => r.checks.filter((c) => !c.pass).map((c) => `- Q${r.question} run ${r.run}: ${c.name}`));
